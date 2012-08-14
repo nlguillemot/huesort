@@ -1,5 +1,6 @@
 #include <SDL/SDL.h>
 #include <SDL/SDL_image.h>
+#include <stdio.h>
 
 SDL_Surface *screen;
 
