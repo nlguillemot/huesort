@@ -59,41 +59,62 @@ void heapify(Uint32 *pixels, int n, int i)
 	}
 }
 
-void build_heap(Uint32 *pixels, int n)
+void maybe_draw_picture(SDL_Surface *picture, int n, int i)
+{
+	if (picture && (i % (n/5000 + 1) == 0))
+	{
+		SDL_Flip(picture);
+		SDL_BlitSurface(picture,NULL,screen,NULL);
+		SDL_Flip(screen);
+	}
+}
+
+void build_heap(Uint32 *pixels, int n, SDL_Surface *show_build)
 {
 	int i;
 	for (i = n/2 - 1; i >= 0; --i)
 	{
+		maybe_draw_picture(show_build, n, i);
+		SDL_LockSurface(show_build);
 		heapify(pixels, n, i);
+		SDL_UnlockSurface(show_build);
 	}
 }
 
+void check_for_death()
+{
+	SDL_Event e;
+	while (SDL_PollEvent(&e))
+	{
+		if (e.type == SDL_QUIT)
+			exit(0);
+	}
+}
 // if show_sort is NULL, the image won't be drawn as it is being sorted.
 void sort_pixels(Uint32 *pixels, int n, SDL_Surface *show_sort)
 {
-	SDL_LockSurface(show_sort);
-	build_heap(pixels, n);
-	SDL_UnlockSurface(show_sort);
+	build_heap(pixels, n, show_sort);
+
+	int initial_n = n;
 
 	while (n > 1)
 	{
+		check_for_death();
+
+		maybe_draw_picture(show_sort, initial_n, n);
+
 		SDL_LockSurface(show_sort);
 		swap(pixels, pixels+n-1);
 		--n;
 		heapify(pixels, n, 0);
 		SDL_UnlockSurface(show_sort);
-
-		if (show_sort && (n&1))
-		{
-			SDL_Flip(show_sort);
-			SDL_BlitSurface(show_sort,NULL,screen,NULL);
-			SDL_Flip(screen);
-		}
 	}
 }
 
 int main(int argc, char *argv[])
 {
+	start:;
+
 	if (argc < 2)
 	{
 		printf("Usage: %s <image file> <output image>\n", argv[0]);
@@ -134,6 +155,10 @@ int main(int argc, char *argv[])
 	}
 	SDL_FreeSurface(rawimg);
 
+	SDL_BlitSurface(img,NULL,screen,NULL);
+	SDL_Flip(screen);
+	SDL_Delay(500);
+
 	sort_pixels(img->pixels, img->w * img->h, img);
 
 	SDL_Flip(img);
@@ -141,10 +166,27 @@ int main(int argc, char *argv[])
 	SDL_BlitSurface(img, NULL, screen, NULL);
 	SDL_Flip(screen);
 
-	SDL_Delay(3000);
-
 	if (argc >= 3)
 		SDL_SaveBMP(img, argv[2]);
+
+	SDL_Event e;
+	int paused = 1;
+	while (paused)
+	{
+		while (SDL_PollEvent(&e))
+		{
+			if (e.type == SDL_QUIT)
+				paused = 0;
+			if (e.type == SDL_KEYDOWN)
+			{
+				if (e.key.keysym.sym == SDLK_SPACE)
+				{
+					SDL_FreeSurface(img);
+					goto start; // LOLOLOLOLOLOLOLOLO
+				}
+			}
+		}
+	}
 
 	IMG_Quit();
 
