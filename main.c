@@ -4,14 +4,62 @@
 
 SDL_Surface *screen;
 
-float hue_from_rgb(int r, int g, int b)
+typedef struct hsv_color
+{
+	int hue;
+	int sat;
+	int val;
+} hsv_color;
+
+// 1 if c1 > c2
+// -1 if c2 < c1
+// 0 otherwise
+int cmp_hsv(hsv_color *c1, hsv_color *c2)
+{
+	if (c1->hue > c2->hue) return 1;
+	if (c1->hue < c2->hue) return -1;
+	if (c1->sat > c2->sat) return 1;
+	if (c1->sat < c2->sat) return -1;
+	if (c1->val > c2->val) return 1;
+	if (c1->val < c2->val) return -1;
+	return 0;
+}
+
+hsv_color hue_from_rgb(int r, int g, int b)
 {
 	// return atan2(sqrt(3.0) * (g - b), 2.0f * r - g - b);
-	return atan2(2.0f * r - g - b, sqrt(3.0) * (g - b));
+	// return atan2(2.0f * r - g - b, sqrt(3.0) * (g - b));
+
+	int *maxc = r > g ? (r > b ? &r : &b) : b > g ? &b : &g;
+	int *minc = r < g ? (r < b ? &r : &b) : b < g ? &b : &g;
+
+	hsv_color c;
+
+	if (maxc == minc)
+	{
+		if (r == g && r == b)
+			c.hue = 1000;
+		else
+			c.hue = 0;
+	}
+	else if (maxc == &r)
+		c.hue = (int)((g - b) * 60.0 / (*maxc - *minc)) % 360;
+	else if (maxc == &g)
+		c.hue = ((b - r) * 60.0 / (*maxc - *minc)) + 120;
+	else if (maxc == &b)
+		c.hue = ((r - g) * 60.0 / (*maxc - *minc)) + 240;
+
+	c.val = *maxc;
+	if (*maxc == 0)
+		c.sat = 0;
+	else
+		c.sat = 1 - (*minc * 1.0 / *maxc);
+
+	return c;
 }
 
 // assumes format of pixel is the same as the screen
-float hue_from_u32(Uint32 pixel)
+hsv_color hue_from_u32(Uint32 pixel)
 {
 	Uint8 r, g, b;
 	SDL_GetRGB(pixel, screen->format, &r, &g, &b);
@@ -30,12 +78,12 @@ void heapify(Uint32 *pixels, int n, int i)
 	int toswap = i;
 	int lchild = 2*i+1;
 	int rchild = 2*i+2;
-	float smallest = hue_from_u32(pixels[i]);
+	hsv_color smallest = hue_from_u32(pixels[i]);
 
 	if (lchild < n)
 	{
-		float val = hue_from_u32(pixels[lchild]);
-		if (val < smallest)
+		hsv_color val = hue_from_u32(pixels[lchild]);
+		if (cmp_hsv(&val, &smallest) == 1)
 		{
 			toswap = lchild;
 			smallest = val;
@@ -43,11 +91,10 @@ void heapify(Uint32 *pixels, int n, int i)
 	}
 	if (rchild < n)
 	{
-		float val = hue_from_u32(pixels[rchild]);
-		if (val < smallest)
+		hsv_color val = hue_from_u32(pixels[rchild]);
+		if (cmp_hsv(&val, &smallest) == 1)
 		{
 			toswap = rchild;
-			smallest = val;
 		}
 	}
 
@@ -59,10 +106,21 @@ void heapify(Uint32 *pixels, int n, int i)
 	}
 }
 
+void check_for_death()
+{
+	SDL_Event e;
+	while (SDL_PollEvent(&e))
+	{
+		if (e.type == SDL_QUIT)
+			exit(0);
+	}
+}
+
 void maybe_draw_picture(SDL_Surface *picture, int n, int i)
 {
-	if (picture && (i % (n/5000 + 1) == 0))
+	if (picture && (i % (n/1000) == 0))
 	{
+		check_for_death();
 		SDL_Flip(picture);
 		SDL_BlitSurface(picture,NULL,screen,NULL);
 		SDL_Flip(screen);
@@ -81,15 +139,6 @@ void build_heap(Uint32 *pixels, int n, SDL_Surface *show_build)
 	}
 }
 
-void check_for_death()
-{
-	SDL_Event e;
-	while (SDL_PollEvent(&e))
-	{
-		if (e.type == SDL_QUIT)
-			exit(0);
-	}
-}
 // if show_sort is NULL, the image won't be drawn as it is being sorted.
 void sort_pixels(Uint32 *pixels, int n, SDL_Surface *show_sort)
 {
@@ -111,10 +160,16 @@ void sort_pixels(Uint32 *pixels, int n, SDL_Surface *show_sort)
 	}
 }
 
+const char * get_filename_ext(const char *filename)
+{
+	const char *dot = strrchr(filename, '.');
+	if (!dot || dot == filename) return "";
+	return dot + 1;
+}
+
+
 int main(int argc, char *argv[])
 {
-	start:;
-
 	if (argc < 2)
 	{
 		printf("Usage: %s <image file> <output image>\n", argv[0]);
@@ -132,6 +187,10 @@ int main(int argc, char *argv[])
 		printf("Warning: failed to init support for some image formats\n");
 		printf("IMG_Init: %s\n", IMG_GetError());
 	}
+
+	printf("press spacebar to re-sort the picture once it's done.\n");
+
+	start:; // LOOLLOLOLOLOLOLO
 
 	SDL_Surface *rawimg = IMG_Load(argv[1]);
 	if (!rawimg)
@@ -167,7 +226,13 @@ int main(int argc, char *argv[])
 	SDL_Flip(screen);
 
 	if (argc >= 3)
-		SDL_SaveBMP(img, argv[2]);
+		if (!strcmp(get_filename_ext(argv[2]), "bmp"))
+			SDL_SaveBMP(img, argv[2]);
+		else
+		{
+			printf("Cannot save image if the format is not .bmp\n");
+			fflush(stdout);
+		}
 
 	SDL_Event e;
 	int paused = 1;
